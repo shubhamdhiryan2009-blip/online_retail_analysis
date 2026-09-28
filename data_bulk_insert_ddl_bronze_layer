@@ -1,0 +1,36 @@
+-- Step 1: Truncate or drop the staging table
+IF OBJECT_ID('online_retails_staging', 'U') IS NOT NULL
+DROP TABLE online_retails_staging;
+GO
+
+-- Step 2: Create staging table with larger columns
+CREATE TABLE online_retails_staging (
+    InvoiceNo   NVARCHAR(100),
+    StockCode   NVARCHAR(100),
+    Description NVARCHAR(1000),  -- Increased size
+    Quantity    NVARCHAR(50),
+    InvoiceDate NVARCHAR(100),
+    UnitPrice   NVARCHAR(50),
+    CustomerID  NVARCHAR(100),
+    Country     NVARCHAR(100)
+);
+GO
+
+-- Step 3: Bulk insert with proper CSV format handling
+BULK INSERT online_retails_staging
+FROM 'C:\data analyst projects 10 days challange\Online Retail Transaction Data\online_retail.csv\online_retail.csv'
+WITH (
+    FIRSTROW = 2,
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '0x0a',
+    FORMAT = 'CSV',          -- CRITICAL: Tells SQL Server to handle CSV properly
+    FIELDQUOTE = '"',        -- Specifies that fields are enclosed in double quotes
+    CODEPAGE = '1252',      -- UTF-8 encoding
+    TABLOCK,
+    MAXERRORS = 1000
+);
+GO
+
+-- Step 4: Check if data loaded correctly
+SELECT COUNT(*) AS TotalRows FROM online_retails_staging;
+SELECT * FROM online_retails_staging;
