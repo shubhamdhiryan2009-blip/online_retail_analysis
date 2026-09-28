@@ -1,0 +1,100 @@
+----Which products drive the most revenue vs. volume?
+SELECT 
+Description,
+count(*) as volumne,
+SUM(Revenue) as total_revenue
+FROM silver_online_retails_sales
+WHERE cancel_invoice != 1
+GROUP BY Description
+order by SUM(Revenue)  desc
+
+------- Which countries are underperforming relative to size?
+select 
+Country,
+total_revenue,
+Invoice_no,
+round(total_revenue / Invoice_no, 2) as AOV
+from
+(SELECT 
+Country,
+sum(Revenue) as total_revenue,
+count(Invoice_no) as Invoice_no
+FROM silver_online_retails_sales
+WHERE cancel_invoice != 1
+group by Country 
+)t order by total_revenue asc
+
+-----What's the cancellation rate, and does it cluster by product/country?
+
+select 
+Country,
+description,
+cancellation_vol,
+sum(cancellation_vol) over(partition by Country) as cancellation_count_by_country,
+cancellation_vol * 100.0 / sum(cancellation_vol) over() as cancellation_rate_pct
+from(
+select 
+Country,
+description,
+count(cancel_invoice) as cancellation_vol
+from silver_online_retails_sales
+where cancel_invoice = 1 and StockCode_Type = 'PRODUCT'
+group by Country, description
+)t
+order by cancellation_vol desc
+
+--- Who are the most valuable customers? (RFM)
+SELECT CustomerID,
+year(InvoiceDate) as year,
+Month(InvoiceDate) as month,
+count(Invoice_no) as total_orders,
+sum(Revenue) as total_revenue
+FROM silver_online_retails_sales
+where cancel_invoice = 0 and CustomerID is not null
+group by CustomerID, year(InvoiceDate), Month(InvoiceDate)
+
+-----Monthly Total Revenue Trends
+select *,
+row_number() over(partition by year order by total_revenue desc) as rank_by_revenue
+from(
+select 
+year(InvoiceDate) as year,
+datename(month,InvoiceDate) as month,
+sum(Revenue) as total_revenue
+from silver_online_retails_sales
+where cancel_invoice != 1 ---- extracting non cancelled inovice
+group by year(InvoiceDate), datename(month,InvoiceDate)
+)t
+where year = 2011
+
+---- Revenue by Product Category / StockCode Type
+select 
+StockCode_Type,
+total_revenue,
+(total_revenue *100.0)/sum(total_revenue) over() as stockCode_typ_revenue_pct
+from(
+select 
+StockCode_Type,
+sum(revenue) as total_revenue
+from silver_online_retails_sales
+where cancel_invoice != 1
+group by StockCode_Type
+)t
+
+---- Top 10 Best-Selling Products by Revenue & Volume
+select top 10
+description,
+sum(revenue) as total_revenue
+from silver_online_retails_sales
+where cancel_invoice != 1
+group by description
+order by sum(revenue) desc
+
+select 
+Quantity
+from silver_online_retails_sales
+order by Quantity desc
+
+
+select *
+from silver_online_retails_sales
