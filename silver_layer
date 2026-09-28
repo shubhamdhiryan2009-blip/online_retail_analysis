@@ -1,0 +1,103 @@
+--  Drop and Recreate Table
+IF OBJECT_ID('silver_online_retails_sales', 'U') IS NOT NULL 
+    DROP TABLE silver_online_retails_sales;
+GO
+
+CREATE TABLE silver_online_retails_sales(
+    invoice_no VARCHAR(50),
+    cancel_invoice BIT,
+    StockCode_Type VARCHAR(50),
+    Base_StockCode VARCHAR(50),
+    Description VARCHAR(1000),
+    Quantity INT,
+    InvoiceDate DATETIME,
+    UnitPrice DECIMAL(10,2),
+    CustomerID VARCHAR(50),
+    Country VARCHAR(50),
+    Revenue DECIMAL(10,2)
+);
+GO
+
+-- Insert Cleaned & IQR-Filtered Data
+WITH sales_data AS (
+    SELECT 
+        CASE 
+            WHEN InvoiceNo LIKE 'C%' THEN SUBSTRING(InvoiceNo, 2, LEN(InvoiceNo)) 
+            ELSE InvoiceNo 
+        END AS invoice_no,
+        
+        CASE 
+            WHEN InvoiceNo LIKE 'C%' THEN 1 
+            ELSE 0 
+        END AS cancel_invoice,
+        
+        CASE 
+            WHEN TRIM(UPPER(StockCode)) IN ('S', 'POST', 'D', 'M', 'PADS', 'DOT', 'CRUK', 'BANK CHARGES', 'AMAZONFEE', 'C2') THEN 'SERVICE'
+            WHEN TRIM(UPPER(StockCode)) LIKE '%GIFT%' OR TRIM(UPPER(StockCode)) LIKE '%DCGS%' THEN 'GIFT_VOUCHER'
+            ELSE 'PRODUCT'
+        END AS StockCode_Type,
+        
+        CASE 
+            WHEN TRIM(UPPER(StockCode)) IN ('S', 'POST', 'D', 'M', 'PADS', 'DOT', 'CRUK', 'BANK CHARGES', 'AMAZONFEE', 'C2') 
+                 OR TRIM(UPPER(StockCode)) LIKE '%GIFT%' 
+                 OR TRIM(UPPER(StockCode)) LIKE '%DCGS%' 
+                 THEN TRIM(UPPER(StockCode))
+            ELSE LEFT(TRIM(UPPER(StockCode)), 5)
+        END AS Base_StockCode,
+        
+        UPPER(TRIM(Description)) AS Description,
+        TRY_CAST(Quantity AS INT) AS Quantity,
+        CAST(InvoiceDate AS DATETIME) AS InvoiceDate,
+        CAST(UnitPrice AS DECIMAL(10,2)) AS UnitPrice, 
+        CustomerID,
+        Country
+    FROM online_retails_staging
+),
+product_quartiles AS (
+    SELECT 
+        Base_StockCode,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY Quantity) OVER (PARTITION BY Base_StockCode) AS q1,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY Quantity) OVER (PARTITION BY Base_StockCode) AS q3
+    FROM sales_data
+    WHERE Quantity > 0 -- Evaluates only valid positive sales for IQR
+),
+bounds AS (
+    SELECT DISTINCT 
+        Base_StockCode,
+        (q1 - 1.5 * (q3 - q1)) AS lower_bound,
+        (q3 + 1.5 * (q3 - q1)) AS upper_bound
+    FROM product_quartiles
+)
+
+
+INSERT INTO silver_online_retails_sales (
+    invoice_no, 
+    cancel_invoice, 
+    StockCode_Type,
+    Base_StockCode, 
+    Description, 
+    Quantity, 
+    InvoiceDate, 
+    UnitPrice, 
+    CustomerID, 
+    Country,
+    Revenue
+)
+SELECT 
+    s.invoice_no,
+    s.cancel_invoice,
+    s.StockCode_Type,
+    s.Base_StockCode,
+    s.Description,
+    s.Quantity,
+    s.InvoiceDate,
+    s.UnitPrice,
+    s.CustomerID,
+    s.Country,
+    CAST((s.Quantity * s.UnitPrice) AS DECIMAL(10,2)) AS Revenue
+FROM sales_data s
+LEFT JOIN bounds b 
+    ON s.Base_StockCode = b.Base_StockCode
+WHERE s.Quantity >= ISNULL(b.lower_bound, s.Quantity) 
+  AND s.Quantity <= ISNULL(b.upper_bound, s.Quantity);
+GO
